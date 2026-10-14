@@ -1,0 +1,4 @@
+interface:
+  display_name: "超星题镜 · Chaoxing Lens"
+  short_description: "优先读取题目与公式源码，原图优先、局部裁剪和缓存辅助识读"
+  default_prompt: "使用 $chaoxing-study 读取当前学习通题目，按题号给出答案和必要解释，先不要填写。"

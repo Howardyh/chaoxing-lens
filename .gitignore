@@ -1,0 +1,13 @@
+node_modules/
+dist/
+local/
+work/
+outputs/
+*.log
+*.tmp
+.env
+.env.*
+credentials*
+*capture*.json
+*screenshot*.png
+*answers*.json

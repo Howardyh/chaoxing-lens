@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>Source-first extraction semantic edge fixture</title>
+  <style>
+    body { max-width: 900px; margin: 24px auto; font: 16px/1.6 system-ui, sans-serif; color: #182b3a; }
+    .questionLi { padding: 18px; margin: 16px 0; border: 1px solid #9cb3c4; }
+    h2, h3, p { margin: 8px 0; }
+    h2 { font-size: 18px; }
+    h3 { font-size: 17px; }
+    .answerList { padding: 0; list-style: none; }
+    .answerBg { padding: 6px; pointer-events: none; }
+    .num_option { display: inline-grid; place-items: center; width: 26px; height: 26px; border: 1px solid #7791a9; border-radius: 50%; }
+    .check_answer { color: white; background: #2865c5; }
+    .reference-answer { margin-top: 12px; padding: 10px; background: #eef4f8; }
+    input, textarea { font: inherit; }
+    img.formula-image { vertical-align: middle; }
+    math { font-size: 25px; }
+  </style>
+</head>
+<body data-readonly-fixture="true">
+  <h1>Offline semantic edge cases</h1>
+  <p>Static DOM only: no scripts, event handlers, remote assets, form submission or editable controls.</p>
+
+  <section class="questionLi" id="question901" aria-label="题目 1.">
+    <h3>1.（简答题）</h3>
+    <p>EDGE_FRACTION_CONFLICT: 表示同一公式的两份 TeX 源不能被丢弃花括号后误判相同。</p>
+    <p><img class="formula-image" width="180" height="48" alt="公式"
+      data-latex="\frac{1}{23}" data-tex="\frac{12}{3}"
+      src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='48'%3E%3Ctext x='8' y='32' font-size='25'%3E1%20%2F%2023%3C/text%3E%3C/svg%3E"></p>
+  </section>
+
+  <section class="questionLi" id="question902" aria-label="题目 2.">
+    <h3>2.（简答题）</h3>
+    <p>EDGE_UNSUPPORTED_MATHML: 普通描述性 aria-label 不能覆盖未解析的 MathML 语义。</p>
+    <p><math xmlns="http://www.w3.org/1998/Math/MathML" aria-label="特殊公式"><menclose notation="box"><mi>x</mi></menclose></math></p>
+  </section>
+
+  <section class="questionLi" id="question903" aria-label="题目 3.">
+    <h3>3.（单选题）</h3>
+    <p>EDGE_HIDDEN_SELECTION: A 未选，B 已选；隐藏模板中的勾选 class 不是已选状态。</p>
+    <ul class="answerList">
+      <li class="answerBg">
+        <span class="num_option" role="radio" aria-label="A" aria-disabled="true">A</span>
+        <span class="check_answer" hidden style="display:none">HIDDEN_CHECK_TEMPLATE</span>
+        <span>甲选项（未选）</span>
+      </li>
+      <li class="answerBg">
+        <span class="num_option check_answer" role="radio" aria-label="B" aria-disabled="true">B</span>
+        <span>乙选项（已选）</span>
+      </li>
+    </ul>
+  </section>
+
+  <section class="questionLi" id="question904" aria-label="题目 4.">
+    <h3>4.（填空题）</h3>
+    <p>EDGE_REVIEW_CONTROLS: 正常作答控件仅一项，已显示参考答案中的控件不可进入 controls。</p>
+    <label>当前作答：<input type="text" value="CURRENT_ANSWER_ONLY" aria-label="current-answer-control" readonly></label>
+    <div class="reference-answer">
+      <p>VISIBLE_REFERENCE_SENTINEL：这些资料归属于已显示解析。</p>
+      <label>参考：<input type="text" value="REFERENCE_INPUT_ONLY" aria-label="reference-input-control" readonly></label>
+      <label>解析：<textarea rows="2" cols="40" aria-label="reference-textarea-control" readonly>REFERENCE_TEXTAREA_ONLY</textarea></label>
+      <p><img class="formula-image" width="180" height="48" alt="公式" data-latex="Q=W"
+        src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='48'%3E%3Ctext x='8' y='32' font-size='25'%3EQ%20%3D%20W%3C/text%3E%3C/svg%3E"></p>
+    </div>
+  </section>
+
+  <section class="questionLi" id="question905">
+    <h2>三、判断题（章节前缀不是题号）</h2>
+    <h3>5.（判断题）</h3>
+    <p>EDGE_HEADING_NUMBER: root 没有题号 aria-label；实际题号由可见 h3 给出，不是 source ID 905。</p>
+    <ul class="answerList">
+      <li class="answerBg"><span class="num_option" role="radio" aria-label="A" aria-disabled="true">A</span><span>对</span></li>
+      <li class="answerBg"><span class="num_option" role="radio" aria-label="B" aria-disabled="true">B</span><span>错</span></li>
+    </ul>
+  </section>
+</body>
+</html>

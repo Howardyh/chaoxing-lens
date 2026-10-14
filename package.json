@@ -1,0 +1,18 @@
+{
+  "name": "chaoxing-lens",
+  "version": "0.3.0",
+  "description": "Chaoxing Lens · 超星题镜：源码优先的题目与公式读取工具及 Codex skill",
+  "type": "module",
+  "private": true,
+  "engines": { "node": ">=24.0.0" },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node --test test/*.test.js",
+    "check": "npm run build && npm test && node scripts/check-public.mjs",
+    "bench": "node scripts/benchmark.mjs",
+    "install:skill": "node scripts/install-skill.mjs",
+    "prepare:assets": "node scripts/prepare-assets.mjs",
+    "associate:ocr": "node scripts/associate-ocr.mjs"
+  },
+  "devDependencies": { "jsdom": "27.4.0" }
+}
