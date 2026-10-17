@@ -18,4 +18,14 @@ The installer backs up an existing `chaoxing-study` skill before copying verifie
 
 See [the workflow](skill/references/browser-workflow.md) for original-image acquisition, screenshot descriptors, crop planning and local OCR. Runtime captures, images and credentials belong in ignored `local/`, never in the public repository.
 
+Version 0.4 adds a reasoning packet that keeps complete prompts, ordered options, formulas and shared material while leaving automation coordinates and locators in the original capture. A local answer formatter outputs a numbered table, literal judgment-option text, separate fill-in blanks and copyable written answers. It checks capture identity, option labels, blank counts and recorded visual review; pending answers remain visibly pending. These checks do not prove subject-matter correctness.
+
+```sh
+node scripts/prepare-answers.mjs local/capture.json local/answer-run-1
+# Solve and verify the questions, then populate the generated answers.json.
+node scripts/format-answers.mjs local/capture.json local/answer-run-1/answers.json local/answer-sheet-1.md
+```
+
+Small tasks can use the same layout directly in chat without running extra helpers. See [the answer workflow](skill/references/answer-workflow.md). Benchmarks now report packet bytes and local formatting time; bytes are not tokens, and local timings do not establish end-to-end model latency or answer accuracy.
+
 Tests use synthetic questions and deterministic jsdom geometry; they do not prove native screenshot layout. Benchmark results describe synthetic DOM work, not end-to-end browser or recognition latency. Formula transcription and diagram relationships require visual verification. This package does not bundle formula-model weights, call hidden answer APIs, inspect cookies or submit work by itself.

@@ -4,7 +4,7 @@
  * It never fetches, changes the page, reads storage, or accesses page script state.
  */
 export function extractVisibleQuestions(rootDocument, options = {}) {
-  const VERSION = "0.3.0";
+  const VERSION = "0.4.0";
   const started = Date.now();
   const capturedAt = new Date(started).toISOString();
   const captureId = String(options.captureId || capturedAt + ":" + Math.random().toString(36).slice(2, 9));

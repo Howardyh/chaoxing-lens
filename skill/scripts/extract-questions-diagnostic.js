@@ -1,7 +1,7 @@
-/* Chaoxing Lens 0.3.0; source-sha256=5981143175f90dad280fb11cfdf7493d16c29cd93a5ad74472ef397da57dda0d
+/* Chaoxing Lens 0.4.0; source-sha256=15f7427ce5926bcfefb0cfad8eb173190b891dc55122e79325a6607d45d054e7
  * Read-only DOM extraction. No network, storage, page JS or UI writes. */
 (function extractVisibleQuestions(rootDocument, options = {}) {
-  const VERSION = "0.3.0";
+  const VERSION = "0.4.0";
   const started = Date.now();
   const capturedAt = new Date(started).toISOString();
   const captureId = String(options.captureId || capturedAt + ":" + Math.random().toString(36).slice(2, 9));
