@@ -16,10 +16,15 @@ for (const [filename, diagnostics] of [['extract-questions.js', false], ['extrac
 for (const [from, to, replacements] of [
   ['src/asset-pipeline.js','asset-pipeline.mjs',[]],
   ['src/ocr-results.js','ocr-results.mjs',[]],
-  ['src/answer-sheet.js','answer-sheet.mjs',[]],
+  ['src/semantic-cache.js','semantic-cache.mjs',[]],
+  ['src/jev-assist.js','jev-assist.mjs',[]],
+  ['src/evaluation.js','evaluation.mjs',[]],
+  ['src/answer-sheet.js','answer-sheet.mjs',[["'./semantic-cache.js'","'./semantic-cache.mjs'"]]],
+  ['scripts/check-jev.mjs','check-jev.mjs',[["'../src/jev-assist.js'","'./jev-assist.mjs'"]]],
+  ['scripts/evaluate-runs.mjs','evaluate-runs.mjs',[["'../src/evaluation.js'","'./evaluation.mjs'"]]],
   ['scripts/prepare-assets.mjs','prepare-assets.mjs',[["'../src/asset-pipeline.js'","'./asset-pipeline.mjs'"]]],
   ['scripts/associate-ocr.mjs','associate-ocr.mjs',[["'../src/ocr-results.js'","'./ocr-results.mjs'"]]],
-  ['scripts/prepare-answers.mjs','prepare-answers.mjs',[["'../src/answer-sheet.js'","'./answer-sheet.mjs'"]]],
+  ['scripts/prepare-answers.mjs','prepare-answers.mjs',[["'../src/answer-sheet.js'","'./answer-sheet.mjs'"],["'../src/semantic-cache.js'","'./semantic-cache.mjs'"]]],
   ['scripts/format-answers.mjs','format-answers.mjs',[["'../src/answer-sheet.js'","'./answer-sheet.mjs'"]]]
 ]) {
   let text = (await readFile(path.join(root,from),'utf8')).replace(/\r\n/g,'\n');

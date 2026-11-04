@@ -127,7 +127,7 @@ test('visual-only SVG remains mapped for review and never becomes an OCR job', (
   assert.equal(result.mappings.length,1);
 });
 
-test('two OCR and three visual tasks yield three review mappings but only two OCR entries', () => {
+test('two identical OCR contents and three visual tasks retain all aliases with one OCR job', () => {
   const assets = [asset({assetId:'png-1'}),asset({assetId:'background-1',kind:'background-image',naturalSize:null}),asset({assetId:'svg-1',kind:'svg',naturalSize:null})];
   const input = capture(assets);
   input.ocrQueue = input.ocrQueue.slice(0,2);
@@ -137,9 +137,10 @@ test('two OCR and three visual tasks yield three review mappings but only two OC
   assert.deepEqual(result.mappings.map(item => item.needsOCR),[true,true,false]);
   const completed = result.mappings.map((item,index) => ({...item,status:'ready',path:`work/crop-${index}.png`,sha256:hash}));
   const manifest = createOcrManifest(completed);
-  assert.equal(manifest.images.length,input.ocrQueue.length);
+  assert.equal(manifest.images.length,1);
+  assert.equal(manifest.requestedAssets,input.ocrQueue.length);
   assert.equal(result.mappings.filter(item => item.needsVisualReview).length,input.visualQueue.length);
-  assert.deepEqual(manifest.images.map(item => item.assetId),['png-1','background-1']);
+  assert.deepEqual(manifest.images[0].aliases.map(item => item.assetId),['png-1','background-1']);
 });
 
 test('confirmed observed originals take precedence over screenshots; unknown originals do not', () => {

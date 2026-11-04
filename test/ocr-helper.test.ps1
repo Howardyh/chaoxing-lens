@@ -213,6 +213,21 @@ try {
         Assert-True ($empty.document.stats.cacheWrites -eq 0) 'empty OCR is not persisted as a recognized cache record'
         Passed 'empty image status'
 
+        $emptyCached = Invoke-Helper @{ ImagePath = @($blankPng); CacheDirectory = $cacheDirectory }
+        Assert-True ($emptyCached.exitCode -eq 1 -and $emptyCached.document.results[0].status -eq 'empty') 'failure cache does not convert an empty result to success'
+        Assert-True ($emptyCached.document.stats.recognitionCalls -eq 0 -and $emptyCached.document.results[0].cacheHit -and -not $emptyCached.document.results[0].verified) 'recent empty content avoids OCR and remains unverified'
+        $emptyDisabled = Invoke-Helper @{ ImagePath = @($blankPng); CacheDirectory = $cacheDirectory; FailureCacheSeconds = 0 }
+        Assert-True ($emptyDisabled.document.stats.recognitionCalls -eq 1 -and -not $emptyDisabled.document.results[0].cacheHit) 'negative cache can be disabled'
+        Passed 'temporary empty cache and explicit retry'
+
+        $negativeFile = Join-Path $cacheDirectory ('negative-' + $empty.document.results[0].cacheKey + '.json')
+        $negativeRecord = [IO.File]::ReadAllText($negativeFile,[Text.Encoding]::UTF8) | ConvertFrom-Json
+        $negativeRecord.payload.expiresAt = [DateTime]::UtcNow.AddSeconds(-1).ToString('o')
+        [IO.File]::WriteAllText($negativeFile,($negativeRecord | ConvertTo-Json -Depth 12),(New-Object Text.UTF8Encoding($false)))
+        $emptyExpired = Invoke-Helper @{ ImagePath = @($blankPng); CacheDirectory = $cacheDirectory }
+        Assert-True ($emptyExpired.document.stats.recognitionCalls -eq 1 -and -not $emptyExpired.document.results[0].cacheHit) 'expired failure cache retries recognition'
+        Passed 'failure cache expiry'
+
         $deadline = Invoke-Helper @{ ManifestPath = $manifestPath; BatchTimeoutMs = 1; ImageTimeoutMs = 30000 }
         Assert-True ($deadline.exitCode -eq 1) 'expired batch returns partial exit 1'
         Assert-True (@($deadline.document.results | Where-Object { $_.status -notin @('timeout', 'skipped') }).Count -eq 0) 'deadline distinguishes timed-out/skipped entries from empty OCR'

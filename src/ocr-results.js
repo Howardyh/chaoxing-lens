@@ -13,17 +13,21 @@ export function associateOcrResults(capture, manifest, recognition, { captureHas
     seen.add(result.imageKey);
     if (result.questionKey !== image.questionKey) { reject('question-reference-mismatch'); continue; }
     if (!result.sourceSha256 || result.sourceSha256 !== image.sha256) { reject('image-content-mismatch'); continue; }
-    const keys = image.questionKeys || [image.questionKey];
+    for (const alias of image.aliases || [image]) {
+    if (alias.sha256 !== image.sha256 || !assets.has(alias.assetId || alias.imageKey)) { reject('invalid-content-alias'); continue; }
+    const assetId = alias.assetId || alias.imageKey;
+    const keys = alias.questionKeys || [alias.questionKey];
     if (!keys.length || keys.some(key => !questions.has(key))) { reject('unknown-question-reference'); continue; }
-    const tasks = (capture.ocrQueue || []).filter(t => t.assetId === image.imageKey);
+    const tasks = (capture.ocrQueue || []).filter(t => t.assetId === assetId);
     const allowed = new Set(tasks.flatMap(t => [...(t.questionKeys || []), t.questionKey]).filter(Boolean));
     if (!allowed.size || new Set(keys).size !== allowed.size || keys.some(key => !allowed.has(key))) { reject('asset-consumer-mismatch'); continue; }
-    const asset = assets.get(image.imageKey);
-    if (image.frame && image.frame !== asset.frame || image.contextId && image.contextId !== asset.contextId) { reject('asset-scope-mismatch'); continue; }
-    if (image.needsOCR === false) { reject('visual-only-asset'); continue; }
+    const asset = assets.get(assetId);
+    if (alias.frame && alias.frame !== asset.frame || alias.contextId && alias.contextId !== asset.contextId) { reject('asset-scope-mismatch'); continue; }
+    if (alias.needsOCR === false) { reject('visual-only-asset'); continue; }
     const references = tasks.flatMap(t => (t.questionKeys || [t.questionKey]).map(questionKey => ({questionKey,owner:t.owner,ownerIndex:t.ownerIndex,optionLabel:t.optionLabel,contextId:t.contextId})));
-    readings.push({ assetId: image.imageKey, questionKeys: [...allowed], sourceSha256: result.sourceSha256, status: result.status, text: String(result.text || ''), verified: false, cacheHit: Boolean(result.cacheHit), acquisition: image.acquisition, frame: asset.frame, references, diagnostics: result.diagnostics || [] });
+    readings.push({ assetId, questionKeys: [...allowed], sourceSha256: result.sourceSha256, status: result.status, text: String(result.text || ''), verified: false, cacheHit: Boolean(result.cacheHit), acquisition: alias.acquisition, frame: asset.frame, references, diagnostics: result.diagnostics || [] });
+    }
   }
   const completed = new Set(readings.filter(r => r.status === 'recognized' && r.text.trim()).map(r => r.assetId));
-  return { schema: 'chaoxing-associated-readings/v1', captureHash, readings, rejections, unresolved: (capture.ocrQueue || []).filter(t => !completed.has(t.assetId)).map(t => ({ assetId:t.assetId,questionKey:t.questionKey })), requiresVisualVerification: true };
+  return { schema: 'chaoxing-associated-readings/v1', captureHash, readings, assetContent: readings.map(r => ({ assetId: r.assetId, sha256: r.sourceSha256 })), rejections, unresolved: (capture.ocrQueue || []).filter(t => !completed.has(t.assetId)).map(t => ({ assetId:t.assetId,questionKey:t.questionKey })), requiresVisualVerification: true };
 }

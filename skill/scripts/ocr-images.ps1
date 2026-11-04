@@ -13,8 +13,10 @@ Optional CacheDirectory contains local JSON records keyed by source-byte SHA256,
 CacheVersion, Windows.Media.Ocr, resolved language, Windows version and PreprocessKey.
 No pixel normalization is done. PreprocessKey declares the caller's preprocessing
 configuration, so change it whenever that configuration changes. Identical pixels
-with different PNG encodings can miss the cache. Only recognized nonempty output is
-cached. Cache hits are reading aids, never verified mathematical transcription.
+with different PNG encodings can miss the cache. Recognized text uses the regular
+cache; empty/failed/timeout results use a short failure cache (60 seconds by
+default, disable with FailureCacheSeconds=0). Failures stay failures. Cache hits
+are reading aids, never verified mathematical transcription.
 
 ImageTimeoutMs is the total per-image budget; BatchTimeoutMs covers input setup,
 initialization and all image operations. The final JSON report is still emitted
@@ -54,7 +56,8 @@ param(
     [ValidateRange(1, 3600000)] [int] $BatchTimeoutMs = 120000,
     [string] $CacheDirectory,
     [ValidateNotNullOrEmpty()] [string] $CacheVersion = 'windows-media-ocr/v2',
-    [ValidateNotNullOrEmpty()] [string] $PreprocessKey = 'source-png/bgra8-ignore-alpha/v1'
+    [ValidateNotNullOrEmpty()] [string] $PreprocessKey = 'source-png/bgra8-ignore-alpha/v1',
+    [ValidateRange(0,300)] [int] $FailureCacheSeconds = 60
 )
 
 $ErrorActionPreference = 'Stop'
@@ -158,7 +161,8 @@ function Copy-Payload($Payload, $Result) {
     $Result.width = $Payload.width
     $Result.height = $Payload.height
     $Result.textAngle = $Payload.textAngle
-    $Result.status = 'recognized'
+    $Result.status = if (Get-EntryValue $Payload 'status') { $Payload.status } else { 'recognized' }
+    if ($Result.status -ne 'recognized') { $Result.reason = 'recent-empty-or-failure'; $Result.diagnostics += 'Recent failure cache; retry suppressed temporarily. Inspect visually.' }
 }
 
 try {
@@ -283,7 +287,10 @@ try {
             $result.cacheKey = Get-Sha256 ([Text.Encoding]::UTF8.GetBytes(($fingerprint | ConvertTo-Json -Compress)))
             $payload = $null
             if ($memoryCache.ContainsKey($result.cacheKey)) {
-                $payload = $memoryCache[$result.cacheKey]; $result.cacheHit = $true; $result.cacheSource = 'memory'
+                $candidate = $memoryCache[$result.cacheKey]
+                if (!(Get-EntryValue $candidate 'expiresAt') -or [DateTime]::Parse($candidate.expiresAt).ToUniversalTime() -gt [DateTime]::UtcNow) {
+                    $payload = $candidate; $result.cacheHit = $true; $result.cacheSource = 'memory'
+                }
             } elseif ($cacheRoot) {
                 $cacheFile = Join-Path $cacheRoot ($result.cacheKey + '.json')
                 if ([IO.File]::Exists($cacheFile)) {
@@ -299,11 +306,25 @@ try {
                     } catch { $result.diagnostics += ('Cache ignored: ' + (Get-ErrorDetail $_)) }
                 }
             }
+            if (!$payload -and $cacheRoot -and $FailureCacheSeconds -gt 0) {
+                $negativeFile = Join-Path $cacheRoot ('negative-' + $result.cacheKey + '.json')
+                if ([IO.File]::Exists($negativeFile)) {
+                    try {
+                        $negative = [IO.File]::ReadAllText($negativeFile,[Text.Encoding]::UTF8) | ConvertFrom-Json
+                        if ($negative.schema -eq 'chaoxing-negative-ocr-cache/v1' -and $negative.cacheKey -eq $result.cacheKey -and
+                            $negative.sourceSha256 -eq $result.sourceSha256 -and @('empty','failed','timeout') -contains $negative.payload.status -and
+                            [DateTime]::Parse($negative.payload.expiresAt).ToUniversalTime() -gt [DateTime]::UtcNow) {
+                            $payload=$negative.payload; $result.cacheHit=$true; $result.cacheSource='disk'; $memoryCache[$result.cacheKey]=$payload
+                        }
+                    } catch { $result.diagnostics += 'Invalid or expired failure cache ignored.' }
+                }
+            }
             Assert-Budget $imageDeadline $stage
             $result.timings.cacheMs += $stageTimer.ElapsedMilliseconds; $stageTimer = $null
             if ($null -ne $payload) {
                 $stage = 'prepare-cached-output'; $timingField = 'outputMs'; $stageTimer = [Diagnostics.Stopwatch]::StartNew()
                 Copy-Payload $payload $result
+                if ($result.status -ne 'recognized') { $exitCode = 1 }
                 $result.diagnostics += 'Cache hit; text remains unverified. Review against the current source image.'
                 Assert-Budget $imageDeadline $stage
                 if ($result.cacheSource -eq 'memory') { $document.stats.memoryHits++ } else { $document.stats.diskHits++ }
@@ -393,6 +414,16 @@ try {
                 if ($null -ne $disposable) { try { $disposable.Dispose() } catch { $result.diagnostics += 'A timed-out image resource could not be disposed immediately.' } }
             }
             $result.elapsedMs = $imageClock.ElapsedMilliseconds; $result.timings.totalMs = $result.elapsedMs
+        }
+        if ($FailureCacheSeconds -gt 0 -and $result.cacheKey -and !$result.cacheHit -and @('empty','failed','timeout') -contains $result.status) {
+            $negativePayload=[pscustomobject]@{status=$result.status;text='';lines=@();width=$result.width;height=$result.height;textAngle=$null;expiresAt=[DateTime]::UtcNow.AddSeconds($FailureCacheSeconds).ToString('o')}
+            $memoryCache[$result.cacheKey]=$negativePayload
+            if ($cacheRoot) {
+                try {
+                    $negative=[ordered]@{schema='chaoxing-negative-ocr-cache/v1';cacheKey=$result.cacheKey;sourceSha256=$result.sourceSha256;verified=$false;payload=$negativePayload}
+                    [IO.File]::WriteAllText((Join-Path $cacheRoot ('negative-' + $result.cacheKey + '.json')),($negative | ConvertTo-Json -Depth 8),(New-Object Text.UTF8Encoding($false)))
+                } catch { $result.diagnostics += 'Failure cache could not be saved.' }
+            }
         }
         $allResults.Add([pscustomobject]$result)
     }

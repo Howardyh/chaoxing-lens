@@ -69,6 +69,16 @@ node scripts/prepare-assets.mjs --capture local/capture.json --mappings local/cr
 
 ## 本地 OCR
 
+透明/小图先做白底与缩放，保留原图及前后内容哈希，长图完整缩放为预览，不截断：
+
+```powershell
+& .\skill\scripts\prepare-images.ps1 -ManifestPath .\local\run-2\ocr-images.json -OutputDirectory .\local\prepared-1
+```
+
+随后将下列 OCR/关联命令中的清单替换成 `local/prepared-1/images.json`，并向 OCR 传入相应 `-PreprocessKey 'white-scale3-padding16/v1'`。`images` 是独立完整图片，`sheets` 仅用于视觉概览；不可对拼图做 OCR 后按位置猜题目。哈希去重保留 `aliases`；关联器展开到每个真实资产及其消费者，不能按数组序号关联。
+
+`-FailureCacheSeconds` 默认60，0为禁用。空白、失败和超时缓存仅短暂避免重复开销，保持未核验状态；预处理配置变化会重新识别。识别文字仍须人工/视觉核验，失败不得改成“已识别”。
+
 Windows PowerShell 5.1：
 
 ```powershell

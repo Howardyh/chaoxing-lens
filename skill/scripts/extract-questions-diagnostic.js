@@ -1,18 +1,18 @@
-/* Chaoxing Lens 0.4.0; source-sha256=15f7427ce5926bcfefb0cfad8eb173190b891dc55122e79325a6607d45d054e7
+/* Chaoxing Lens 0.5.0; source-sha256=379a16e30868c5e418cb3fae50ca2d4323471c9362a3fcb2ff8dbeea80713a6a
  * Read-only DOM extraction. No network, storage, page JS or UI writes. */
 (function extractVisibleQuestions(rootDocument, options = {}) {
-  const VERSION = "0.4.0";
+  const VERSION = "0.5.0";
   const started = Date.now();
   const capturedAt = new Date(started).toISOString();
   const captureId = String(options.captureId || capturedAt + ":" + Math.random().toString(36).slice(2, 9));
   const diagnostic = Boolean(options.diagnostics);
   const instrument = Boolean(options.instrument || options.instrumentation);
   const configured = options.selectors || {};
-  const QUESTION = configured.question || '.TiMu, .mark_item, .questionLi, .question-item, .question_item, [id^="question"], [id^="sigleQuestionDiv_"], [data-question-id]';
-  const OPTION = configured.option || '.Zy_ulTop > li, .Zy_ulBottom > li, .answerList > li, li.answerBg, div.answerBg, .option, [role="radio"], [role="checkbox"]';
+  const QUESTION = configured.question || '.TiMu, .mark_item, .singleQuesId, .questionLi, .question-item, .question_item, [id^="question"], [id^="sigleQuestionDiv_"], [data-question-id]';
+  const OPTION = configured.option || '.Zy_ulTop > li, .Zy_ulBottom > li, .mark_letter > li, .answerList > li, li.answerBg, div.answerBg, .option, [role="radio"], [role="checkbox"]';
   const REVIEW = configured.review || '.mark_answer, .analysis, .answer-analysis, .reference-answer';
   const MATH = configured.math || 'math, .katex, .MathJax, mjx-container, [role="math"]';
-  const SKIP = configured.skip || 'script, style, noscript, template, button, .nextDiv, .asFlagBtn';
+  const SKIP = configured.skip || 'script, style, noscript, template, button, .nextDiv, .asFlagBtn, .answerCard, .answer-card, .mark_answerCard, .mark_card, .page-header, .page-footer';
   const counters = { nodeVisits: 0, styleReads: 0, visibilityChecks: 0, pathBuilds: 0, formulaRoots: 0, questionRoots: 0, contextRoots: 0 };
   const styles = new Map();
   const visibility = new Map();
@@ -240,6 +240,12 @@
 
   function describeAsset(el, kind) {
     const sources = metadata(el);
+    // MathJax SVG stores one complete expression on its math root. Reading every
+    // descendant data-latex would confuse subexpressions with competing sources.
+    for (const node of el.querySelectorAll('[data-mml-node="math"][data-latex]')) {
+      if (!visible(node) || node.closest(SKIP)) continue;
+      sources.push(...metadata(node).filter(s => s.format === 'tex').map(s => ({ ...s, origin: 'mathjax-root:' + s.origin })));
+    }
     const canonical = [];
     const unsupportedMath = [];
     let unparsed = false;
@@ -306,7 +312,7 @@
         result.sources.push({ origin: "svg-text", format: "text", text: result.sourceText });
         result.requiresOCR = false;
       }
-      result.requiresVisualReview = true;
+      result.requiresVisualReview = !preferred || sourceConflict || unparsed;
     }
     return result;
   }
@@ -499,9 +505,9 @@
     } catch { warnings.push({ frame, reason: "frame-geometry-unavailable" }); }
     let wrappers, candidates;
     try {
-      wrappers = [...doc.querySelectorAll(QUESTION)].filter(el => visible(el) && !el.matches(".FullfanyaMarking") && !el.closest(SKIP) && !el.closest(REVIEW));
+      wrappers = [...doc.querySelectorAll(QUESTION)].filter(el => visible(el) && !el.matches(".FullfanyaMarking,.fanyaMarking,.fanyaMarkingV2") && !el.closest(SKIP) && !el.closest(REVIEW));
       candidates = wrappers;
-      if (!configured.question) candidates = candidates.filter(el => el.matches(".TiMu,.mark_item,.questionLi,.question-item,.question_item") || /^question\d+$/.test(el.id) || /^sigleQuestionDiv_\d+$/.test(el.id) || el.hasAttribute("data-question-id"));
+      if (!configured.question) candidates = candidates.filter(el => el.matches(".TiMu,.mark_item,.singleQuesId,.questionLi,.question-item,.question_item") || /^question\d+$/.test(el.id) || /^sigleQuestionDiv_\d+$/.test(el.id) || el.hasAttribute("data-question-id"));
     } catch {
       warnings.push({ frame, reason: "invalid-question-selector-or-unavailable-DOM" });
       return;
@@ -601,9 +607,43 @@
     if (visualQuestions.has(q.key)) q.warnings.push("visual-content: inspect queued images/diagrams");
     if (q.contextIds.some(id => contextById.get(id).assetIds.some(assetId => assetsById.get(assetId).requiresVisualReview))) q.warnings.push("context-visual-content: include shared material in visual review");
   }
+  // URL is a routing hint only. Completeness is grounded in visible count/card
+  // evidence, never in a URL parameter or a hidden form input.
+  function pageState() {
+    const doc = rootDocument, url = redactedURL(doc.location?.href, doc);
+    const read = selector => [...doc.querySelectorAll(selector)].filter(visible).map(el => clean(visibleText(el))).filter(Boolean);
+    const chrome = read('.mark_title,.work-title,.exam-title,.totalNum,#totalQuestion,.questionTotal,.question-count,.total-question,.answerCard,.answer-card,.mark_answerCard,.mark_card,.examnotes,.exam-notes,.status,.work-status,.exam-status');
+    const countTexts = chrome.filter(t => /(?:共|总计|总题数|题目总数)\s*[:：]?\s*\d+\s*题|\d+\s*道题/.test(t));
+    const totals = [...new Set(countTexts.flatMap(t => [...t.matchAll(/(?:(?:共|总计|总题数|题目总数)\s*[:：]?\s*(\d+)\s*题|(\d+)\s*道题)/g)].map(m => Number(m[1] || m[2]))))];
+    const cardNumbers = [...new Set([...doc.querySelectorAll('.answerCard a,.answerCard li,.answer-card a,.answer-card li,.mark_answerCard a,.mark_card li,[data-question-number]')].filter(visible).map(el => clean(visibleText(el))).filter(t => /^\d+$/.test(t)).map(Number))];
+    const expected = totals.length === 1 ? totals[0] : totals.length === 0 && cardNumbers.length ? Math.max(...cardNumbers) : null;
+    const readNumbers = questions.map(q => q.questionNumber), numbers = new Set(readNumbers.filter(Number.isSafeInteger));
+    const missingNumbers = expected !== null && expected <= 10000 ? Array.from({ length: expected }, (_, i) => i + 1).filter(n => !numbers.has(n)) : [];
+    const duplicateNumbers = [...numbers].filter(n => readNumbers.filter(v => v === n).length > 1);
+    const timerTexts = read('#remainTime,#remainTime2,.remainTime,.remaining-time,.exam-time,[role="timer"]');
+    let remainingSeconds = null;
+    const timer = timerTexts.find(t => /\d+:\d{2}|\d+\s*分/.test(t));
+    if (timer) {
+      const clock = timer.match(/(?:(\d+):)?(\d+):(\d{2})/);
+      const mins = timer.match(/(\d+)\s*分(?:钟)?\s*(?:(\d+)\s*秒)?/);
+      if (clock) remainingSeconds = Number(clock[1] || 0) * 3600 + Number(clock[2]) * 60 + Number(clock[3]);
+      else if (mins) remainingSeconds = Number(mins[1]) * 60 + Number(mins[2] || 0);
+    }
+    const family = /\/exam-ans\//.test(url) ? 'exam' : /\/work\//.test(url) ? 'assignment' : 'unknown';
+    const reviewed = questions.some(q => q.visibleReview.length);
+    const login = [...doc.querySelectorAll('input[type="password"]')].some(visible) && !questions.length;
+    const statusText = chrome.join('\n');
+    let state = login ? 'login' : reviewed || /已批阅|已评分|成绩[:：]/.test(statusText) ? 'graded' : /已提交|待批阅/.test(statusText) ? 'submitted' : questions.length ? 'answering' : family === 'exam' && /examnotes|examcode/.test(url) ? 'notes' : 'unknown';
+    let scope = !questions.length ? 'none' : expected === null ? 'rendered' : questions.length === expected && !missingNumbers.length && !duplicateNumbers.length ? 'complete' : 'partial';
+    if (totals.length > 1 || expected !== null && questions.length > expected || warnings.some(w => /frame-/.test(w.reason || ''))) scope = questions.length ? 'partial' : 'none';
+    const layout = family === 'exam' ? scope === 'complete' ? 'whole-paper' : questions.length === 1 ? 'single-question' : 'rendered-subset' : 'rendered';
+    return { family, state, layout, expectedCount: expected, countEvidence: totals.length ? 'visible-total' : cardNumbers.length ? 'visible-answer-card' : 'unavailable', conflictingCounts: totals.length > 1 ? totals : [], readCount: questions.length, missingNumbers, duplicateNumbers, coverage: scope, remainingSeconds };
+  }
+  const state = pageState();
+  if (state.coverage === 'partial') warnings.push({ reason: 'incomplete-question-coverage', expected: state.expectedCount, read: questions.length, missingNumbers: state.missingNumbers });
   const result = {
     schema: "chaoxing-visible-questions/v3", version: VERSION, captureId, capturedAt,
-    page: { title: rootDocument.title || "", url: redactedURL(rootDocument.location?.href, rootDocument) },
+    page: { title: rootDocument.title || "", url: redactedURL(rootDocument.location?.href, rootDocument), ...state },
     scope: "currently rendered, CSS-visible questions; offscreen content included; hidden content, unvisited pages and inaccessible frames excluded",
     count: questions.length, questions, assets: [...assets], contexts, frames, ocrQueue, visualQueue,
     summary: { sourceOnlyQuestions: questions.filter(q => q.prompt && !ocrQuestions.has(q.key) && !visualQuestions.has(q.key)).length, ocrTasks: ocrQueue.length, visualTasks: visualQueue.length, assets: assets.length, contexts: contexts.length },

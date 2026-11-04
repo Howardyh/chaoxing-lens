@@ -258,6 +258,19 @@ export function createOcrManifest(mapping) {
   // Conflicting duplicate mappings cannot leave an arbitrary usable first path.
   const conflicts = new Set(result.rejections.filter(item => item.code === 'conflicting-asset-mapping').map(item => item.assetId));
   result.images = result.images.filter(item => !conflicts.has(item.assetId));
+  const contents = new Map();
+  for (const image of result.images) {
+    const alias = { ...image };
+    const existing = contents.get(image.sha256);
+    if (existing) {
+      existing.aliases.push(alias);
+      existing.questionKeys = [...new Set([...existing.questionKeys, ...image.questionKeys])];
+      existing.references.push(...image.references);
+    } else contents.set(image.sha256, { ...image, aliases: [alias] });
+  }
+  result.requestedAssets = result.images.length;
+  result.images = [...contents.values()];
+  result.uniqueContents = result.images.length;
   return result;
 }
 

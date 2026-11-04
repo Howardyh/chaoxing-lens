@@ -1,5 +1,11 @@
 # Chaoxing Lens
 
+Version 0.5.0 defaults to **Question | Answer | Short comparison**. Assignment and exam answering pages are the production inputs; graded pages are review/regression inputs only. Page state reports observed coverage and remaining time, while unknown totals remain unknown.
+
+New capabilities include MathJax SVG root TeX, exact-content question/asset reuse with option remapping, white-background image preparation and adaptive contact sheets, temporary OCR failure caching, separate reading/reasoning/numerical/mapping checks, and blind solve packets that exclude existing answers. Solve packets and answer files now use v2; prepare and verify old runs again.
+
+The optional Jev REST adapter checks local readability, explicit type/polarity and transcription candidates. It never solves subject questions or auto-verifies answers. `check-jev.mjs` previews by default; sending requires an existing data/spending authorization and `TYPESAFE_API_KEY`. Transport tests use mocked responses; live accuracy, latency and costs have not been established. See [Jev and evaluation](skill/references/jev-and-evaluation.md). `evaluate-runs.mjs` compares baseline/improved/improved+jev using accuracy, coverage and measured stage P50/P95; missing runs are not fabricated.
+
 Source-first reading tools for visible Chaoxing questions, formulas and diagrams, with a Codex skill. [中文](README.md)
 
 The read-only extractor produces normalized v3 JSON: questions reference one asset table and shared contexts. It preserves selection state, MathML/TeX sources and explicit OCR/visual-review tasks. The local pipeline prefers images already observed by the browser, otherwise validates frame-local screenshot coordinates and crop provenance. Windows OCR supports content/configuration caching, batch reuse, deadlines and stage timings.

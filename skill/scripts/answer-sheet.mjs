@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
+import { resolveText, optionContent, planQuestionReuse } from './semantic-cache.mjs';
 
-// Keep the complete capture locally. Only presentation/automation metadata is
-// omitted from the reasoning view; no question text is shortened or rewritten.
+// Keep the complete capture locally. The blind view omits operational metadata
+// and existing answers/references; original question text stays intact.
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const without = (value, keys) => Object.fromEntries(Object.entries(value).filter(([key]) => !keys.includes(key)));
 const unique = values => [...new Set(values)];
@@ -19,7 +20,7 @@ function indexed(values, field) {
   return result;
 }
 
-export function prepareAnswers(capture) {
+export function prepareAnswers(capture, { readings = [], assetContent = [] } = {}) {
   if (capture.schema !== 'chaoxing-visible-questions/v3' || !nonempty(capture.captureId)) throw new Error('Expected a v3 capture with captureId');
   const questions = indexed(capture.questions, 'key');
   const assets = indexed(capture.assets, 'assetId');
@@ -50,39 +51,49 @@ export function prepareAnswers(capture) {
     for (const id of unique(ids)) {
       const asset = assets.get(id);
       if (!asset) throw new Error('Unknown question asset');
+      if (['review', 'current-answer'].includes(asset.owner)) continue;
       if (asset.requiresOCR || asset.requiresVisualReview || asset.loaded === false || ['conflicting', 'unparsed'].includes(asset.sourceStatus)) review.get(q.key).add(id);
     }
   }
   const captureHash = hash(capture);
+  const blindAssets = capture.assets.filter(a => !['review', 'current-answer'].includes(a.owner));
   const packet = {
-    schema: 'chaoxing-solve-packet/v1', captureId: capture.captureId, captureHash,
-    page: { title: capture.page?.title }, scope: capture.scope, count: capture.count,
+    schema: 'chaoxing-solve-packet/v2', captureId: capture.captureId, captureHash,
+    page: without(capture.page || {}, ['title', 'url']), scope: capture.scope, count: capture.count,
     questions: capture.questions.map(q => ({
-      ...without(q, ['sourceId', 'locator', 'bounds', 'fullText']),
-      options: q.options.map(o => without(o, ['locator', 'groupLocator', 'selectedSource'])),
-      controls: q.controls.map((c, i) => ({ ...without(c, ['locator']), slot: i + 1 })),
+      ...without(q, ['sourceId', 'locator', 'bounds', 'fullText', 'visibleReview']),
+      options: q.options.map(o => without(o, ['locator', 'groupLocator', 'selectedSource', 'selected'])),
+      controls: q.controls.map((c, i) => ({ ...without(c, ['locator', 'currentText', 'selected']), slot: i + 1 })),
+      assetIds: q.assetIds.filter(id => blindAssets.some(a => a.assetId === id)),
       reviewAssetIds: [...review.get(q.key)]
     })),
     contexts: capture.contexts.map(c => without(c, ['locator', 'bounds'])),
-    assets: capture.assets.map(a => without(a, ['locator', 'bounds', 'source', 'naturalWidth', 'naturalHeight', 'naturalSize', 'unsupportedTransform'])),
+    assets: blindAssets.map(a => without(a, ['locator', 'bounds', 'source', 'naturalWidth', 'naturalHeight', 'naturalSize', 'unsupportedTransform'])),
+    readings: readings.filter(r => blindAssets.some(a => a.assetId === r.assetId)).map(r => without(r, ['path'])),
+    reuse: planQuestionReuse(capture, { readings, assetContent }),
     reviewTasks: [...tasks.values()], warnings: capture.warnings || []
   };
+  const reference = { schema: 'chaoxing-evaluation-reference/v1', captureId: capture.captureId, captureHash,
+    questions: capture.questions.map(q => ({ questionKey: q.key, visibleReview: q.visibleReview, options: q.options.map(o => ({ label: o.label, selected: o.selected })), currentText: q.controls.map(c => c.currentText) })),
+    assets: capture.assets.filter(a => ['review', 'current-answer'].includes(a.owner)) };
   const template = {
-    schema: 'chaoxing-answers/v1', captureId: capture.captureId, captureHash,
+    schema: 'chaoxing-answers/v2', captureId: capture.captureId, captureHash, readings, assetContent,
     answers: packet.questions.map(q => ({
       questionKey: q.key, status: 'review',
       ...(isChoice(q.type) ? { choices: [] } : q.type === 'fill-in' ? { blanks: [] } : { text: '' }),
-      reviewedAssetIds: [], reviewedWarnings: [], note: ''
+      reviewedAssetIds: [], reviewedWarnings: [],
+      checks: Object.fromEntries(['reading', 'solving', 'numeric', 'mapping'].map(name => [name, { status: 'review', evidence: '' }])), note: ''
     }))
   };
-  return { packet, template };
+  return { packet, template, reference };
 }
 
 // "ready" records the solver's judgment, not a proof of correctness. The
 // formatter checks identity, answer shape and outstanding visual checks only.
 export function formatAnswers(capture, answers) {
-  const { packet } = prepareAnswers(capture);
-  if (answers.schema !== 'chaoxing-answers/v1' || answers.captureId !== packet.captureId || answers.captureHash !== packet.captureHash) throw new Error('Answers belong to a different or changed capture; solve against this capture again');
+  const readings = answers.readings || [];
+  const { packet } = prepareAnswers(capture, { readings, assetContent: answers.assetContent || [] });
+  if (answers.schema !== 'chaoxing-answers/v2' || answers.captureId !== packet.captureId || answers.captureHash !== packet.captureHash) throw new Error('Answers belong to a different or changed capture; solve against this capture again (v2 verification required)');
   const entries = indexed(answers.answers, 'questionKey');
   const known = new Set(packet.questions.map(q => q.key));
   if ([...entries.keys()].some(key => !known.has(key))) throw new Error('Unknown answer questionKey');
@@ -97,6 +108,10 @@ export function formatAnswers(capture, answers) {
     let answer = '', details = '', blocks = [];
     if (!a || a.status !== 'ready') issues.push(a?.note || '尚未解答或核验');
     if (a?.status === 'ready') {
+      for (const name of ['reading', 'solving', 'numeric', 'mapping']) {
+        const check = a.checks?.[name];
+        if (!check || !nonempty(check.evidence) || !(check.status === 'passed' || name === 'numeric' && check.status === 'not-applicable')) issues.push(`${{ reading: '读题', solving: '解题', numeric: '数值', mapping: '选项映射' }[name]}核验未记录`);
+      }
       const reviewed = a.reviewedAssetIds || [];
       if (!Array.isArray(reviewed) || q.reviewAssetIds.some(id => !reviewed.includes(id))) issues.push('图片或公式尚未核验');
       const otherWarnings = q.warnings.filter(w => !/^(source-incomplete:|visual-content:|context-visual-content:)/.test(w));
@@ -110,7 +125,9 @@ export function formatAnswers(capture, answers) {
         } else {
           const selected = q.options.filter(o => choices.includes(choiceToken(o)));
           answer = selected.map(choiceToken).join('、');
-          details = selected.map(o => o.text).join('；');
+          const contents = selected.map(o => resolveText(optionContent(o), capture, readings));
+          if (contents.some(r => r.unresolved.length || /\[\[.*?\]\]/.test(r.text))) issues.push('所选项图片尚无已核验转写');
+          details = contents.map(r => r.text).join('；');
           if (q.type === 'true-false') answer = details;
         }
       } else if (q.type === 'fill-in') {
@@ -122,16 +139,21 @@ export function formatAnswers(capture, answers) {
         else { answer = a.text; blocks = [{ label: '答案', value: a.text }]; }
       } else issues.push('题型尚未确认');
     }
-    if (ambiguous) details = `题干：${q.prompt.replace(/\s+/g, ' ').slice(0, 80)}${details ? '；' + details : ''}`;
-    return { questionKey: q.key, label, type: q.type, status: issues.length ? 'review' : 'ready', answer: issues.length ? null : answer, details, blocks: issues.length ? [] : blocks, issues, note: a?.note || '' };
+    if (ambiguous) details = `题干：${resolveText(q.prompt, capture, readings).text.replace(/\[\[.*?\]\]/g, '[图片]').replace(/\s+/g, ' ').slice(0, 80)}${details ? '；' + details : ''}`;
+    if (/\[\[.*?\]\]/.test(answer)) issues.push('答案中仍有内部图片标记');
+    const comparison = nonempty(a?.comparison) ? a.comparison : details.length > 120 ? details.slice(0, 117) + '…' : details;
+    if (/\[\[.*?\]\]/.test(comparison)) issues.push('对照中仍有内部图片标记');
+    return { questionKey: q.key, label, type: q.type, status: issues.length ? 'review' : 'ready', answer: issues.length ? null : answer, details, comparison, blocks: issues.length ? [] : blocks, issues, note: a?.note || '' };
   });
   const ready = rows.filter(r => r.status === 'ready').length;
-  const lines = [`当前已读取 ${rows.length} 题：可填写 ${ready} 题，待确认 ${rows.length - ready} 题。`, '', '以下仅覆盖本次已读取范围。'];
+  const coverage = capture.page?.expectedCount == null ? '本次已读取范围' : `已读 ${rows.length}/${capture.page.expectedCount} 题`;
+  const lines = [`${coverage}；可填写 ${ready} 题，待确认 ${rows.length - ready} 题。`];
+  if (capture.page?.missingNumbers?.length) lines.push(`尚未读取：${capture.page.missingNumbers.join('、')}。`);
   if (packet.warnings.length) lines.push('', '页面读取警告：' + packet.warnings.map(w => cell(typeof w === 'string' ? w : w.reason || JSON.stringify(w))).join('；'));
-  lines.push('', '| 题号 | 填写内容 | 对照 / 说明 |', '| --- | --- | --- |');
+  lines.push('', '| 题号 | 答案 | 简短对照 |', '| --- | --- | --- |');
   for (const row of rows) {
     const value = row.status === 'review' ? '待确认' : row.blocks.length ? '见下方可复制内容' : row.answer;
-    lines.push(`| ${cell(row.label)} | ${cell(value)} | ${cell(row.status === 'review' ? row.issues.join('；') : row.details)} |`);
+    lines.push(`| ${cell(row.label)} | ${cell(value)} | ${cell(row.status === 'review' ? row.issues.join('；') : row.comparison)} |`);
   }
   for (const row of rows.filter(r => r.blocks.length)) {
     for (const block of row.blocks) {
@@ -142,5 +164,5 @@ export function formatAnswers(capture, answers) {
   }
   const notes = rows.filter(r => r.status === 'ready' && r.note);
   if (notes.length) lines.push('', '必要说明：', '', ...notes.map(r => `- ${cell(r.label)}：${cell(r.note)}`));
-  return { schema: 'chaoxing-answer-sheet/v1', captureId: packet.captureId, ready, pending: rows.length - ready, rows, markdown: lines.join('\n') + '\n' };
+  return { schema: 'chaoxing-answer-sheet/v1', captureId: packet.captureId, ready, pending: rows.length - ready, unread: capture.page?.expectedCount == null ? null : Math.max(0, capture.page.expectedCount - rows.length), rows, markdown: lines.join('\n') + '\n' };
 }

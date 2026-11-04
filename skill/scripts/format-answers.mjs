@@ -6,4 +6,4 @@ if (!captureFile || !answerFile || !output) throw new Error('Usage: node format-
 const [capture, answers] = await Promise.all([captureFile, answerFile].map(async file => JSON.parse(await readFile(file, 'utf8'))));
 const result = formatAnswers(capture, answers);
 await writeFile(output, result.markdown, { flag: 'wx' });
-console.log(JSON.stringify({ ready: result.ready, pending: result.pending, output }));
+console.log(JSON.stringify({ ready: result.ready, pending: result.pending, unread: result.unread, output }));

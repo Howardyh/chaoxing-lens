@@ -29,3 +29,8 @@ jobs:
             [System.Management.Automation.Language.Parser]::ParseFile($_.FullName,[ref]$scriptTokens,[ref]$syntaxErrors) | Out-Null
             if ($syntaxErrors.Count) { throw ($syntaxErrors | Out-String) }
           }
+      - name: Windows OCR integration
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          & ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path (Get-Location).Path 'test/ocr-helper.test.ps1')))) -RepositoryRoot (Get-Location).Path

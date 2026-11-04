@@ -15,6 +15,7 @@ function solved(capture) {
     a.status = 'ready';
     // Synthetic test data only; never mark actual review this way.
     a.reviewedAssetIds = q.reviewAssetIds; a.reviewedWarnings = q.warnings;
+    a.checks = Object.fromEntries(['reading', 'solving', 'numeric', 'mapping'].map(k => [k, { status: 'passed', evidence: 'Synthetic fixture verification: ' + k }]));
     if ('choices' in a) a.choices = [q.options[0].label || q.options[0].text];
     else if ('blanks' in a) a.blanks = q.controls.filter(c => ['text', 'textarea', 'contenteditable'].includes(c.kind)).map((_, i) => String(i + 1));
     else a.text = '合成答案';
@@ -28,13 +29,16 @@ test('reasoning packet preserves full semantics and shared content without mutat
     assert.equal(JSON.stringify(c), before); assert.equal(packet.questions.length, c.questions.length);
     for (const [i, q] of c.questions.entries()) {
       const p = packet.questions[i]; assert.equal(p.prompt, q.prompt);
-      assert.deepEqual(p.options.map(o => [o.label, o.text, o.assetIds, o.selected]), q.options.map(o => [o.label, o.text, o.assetIds, o.selected]));
-      for (const field of ['contextIds', 'visibleReview', 'warnings']) assert.deepEqual(p[field], q[field]);
+      assert.deepEqual(p.options.map(o => [o.label, o.text, o.assetIds]), q.options.map(o => [o.label, o.text, o.assetIds]));
+      assert.ok(p.options.every(o => o.selected === undefined));
+      assert.equal(p.visibleReview, undefined);
+      for (const field of ['contextIds', 'warnings']) assert.deepEqual(p[field], q[field]);
       assert.equal(p.locator, undefined); assert.equal(p.bounds, undefined);
-      assert.deepEqual(p.controls.map(x => x.currentText), q.controls.map(x => x.currentText));
+      assert.ok(p.controls.every(x => x.currentText === undefined && x.selected === undefined));
     }
-    for (const [i, a] of c.assets.entries()) {
-      for (const field of ['assetId', 'sources', 'sourceText', 'sourceStatus', 'sourceConflict', 'unsupportedMath', 'requiresVisualReview', 'requiresOCR']) assert.deepEqual(packet.assets[i][field], a[field]);
+    for (const a of c.assets.filter(a => !['review', 'current-answer'].includes(a.owner))) {
+      const preserved = packet.assets.find(p => p.assetId === a.assetId);
+      for (const field of ['assetId', 'sources', 'sourceText', 'sourceStatus', 'sourceConflict', 'unsupportedMath', 'requiresVisualReview', 'requiresOCR']) assert.deepEqual(preserved[field], a[field]);
     }
     assert.deepEqual(packet.contexts.map(x => x.text), c.contexts.map(x => x.text));
     assert.deepEqual(packet.warnings, c.warnings);
