@@ -48,3 +48,66 @@ $normalized.Dispose()`);
     rmSync(absolute, { recursive: true, force: true });
   }
 });
+
+test('dense sheets pack small formulas into columns and keep wide formulas complete and nonoverlapping', { skip: process.platform !== 'win32' }, () => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'chaoxing-image-test-'));
+  try {
+    const helper = path.join(root, 'skill/scripts/prepare-images.ps1');
+    powershell(`$ErrorActionPreference='Stop';Add-Type -AssemblyName System.Drawing
+$entries=New-Object 'System.Collections.Generic.List[object]'
+for($i=0;$i -lt 15;$i++){
+ $w=if($i -eq 6){700}else{80};$b=New-Object Drawing.Bitmap($w,30);$g=[Drawing.Graphics]::FromImage($b);$g.Clear([Drawing.Color]::White);$g.FillRectangle([Drawing.Brushes]::Blue,($w-10),0,10,30)
+ $p=Join-Path ${psQuote(directory)} ('source-'+$i+'.png');$b.Save($p,[Drawing.Imaging.ImageFormat]::Png);$g.Dispose();$b.Dispose()
+ $s=[Security.Cryptography.SHA256]::Create();$h=([BitConverter]::ToString($s.ComputeHash([IO.File]::ReadAllBytes($p)))).Replace('-','').ToLowerInvariant();$s.Dispose()
+ $entries.Add(@{path=$p;sha256=$h;imageKey=('a'+$i);assetId=('a'+$i);questionKey='q1';questionKeys=@('q1');aliases=@()})
+}
+$m=@{captureHash=('a'*64);images=$entries.ToArray()};$mf=Join-Path ${psQuote(directory)} 'manifest.json';[IO.File]::WriteAllText($mf,($m|ConvertTo-Json -Depth 10),(New-Object Text.UTF8Encoding($false)))
+& ([scriptblock]::Create([IO.File]::ReadAllText(${psQuote(helper)}))) -ManifestPath $mf -OutputDirectory ${psQuote(path.join(directory,'dense'))} -SheetHeight 900 -SheetWidth 1200 -Columns 3
+& ([scriptblock]::Create([IO.File]::ReadAllText(${psQuote(helper)}))) -ManifestPath $mf -OutputDirectory ${psQuote(path.join(directory,'single'))} -SheetHeight 900 -SheetWidth 1200 -Columns 1`);
+    const dense = JSON.parse(readFileSync(path.join(directory, 'dense/images.json'))), single = JSON.parse(readFileSync(path.join(directory, 'single/images.json')));
+    assert.equal(dense.images.length, 15); assert.ok(dense.sheets.length < single.sheets.length);
+    const all = dense.sheets.flatMap(s => s.tiles);
+    assert.equal(all.length, 15); assert.ok(all.some(t => t.x > 12)); assert.ok(all.some(t => t.width > 1000));
+    for (const sheet of dense.sheets) for (const [i, a] of sheet.tiles.entries()) {
+      assert.ok(a.x >= 0 && a.y >= 32 && a.x + a.width <= sheet.width && a.y + a.height <= sheet.height);
+      for (const b of sheet.tiles.slice(i + 1)) assert.ok(a.x + a.width <= b.x || b.x + b.width <= a.x || a.y + a.height + 32 <= b.y || b.y + b.height + 32 <= a.y, 'images and labels must not overlap');
+    }
+  } finally {
+    const absolute = path.resolve(directory), boundary = path.resolve(tmpdir()) + path.sep;
+    if (!absolute.startsWith(boundary) || !path.basename(absolute).startsWith('chaoxing-image-test-')) throw new Error('Unsafe temporary cleanup');
+    rmSync(absolute, { recursive: true, force: true });
+  }
+});
+
+test('JPEG screenshot normalization verifies hash and aspect and never re-arms a discarded page', { skip: process.platform !== 'win32' }, () => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'chaoxing-image-test-'));
+  try {
+    const helper = path.join(root, 'skill/scripts/normalize-screenshots.ps1');
+    powershell(`$ErrorActionPreference='Stop';Add-Type -AssemblyName System.Drawing
+$b=New-Object Drawing.Bitmap(600,1200);$g=[Drawing.Graphics]::FromImage($b);$g.Clear([Drawing.Color]::White);$g.FillRectangle([Drawing.Brushes]::Black,10,10,40,40)
+$p=${psQuote(path.join(directory, 'browser.jpg'))};$b.Save($p,[Drawing.Imaging.ImageFormat]::Jpeg);$g.Dispose();$b.Dispose()
+$h=[Security.Cryptography.SHA256]::Create();$hash=([BitConverter]::ToString($h.ComputeHash([IO.File]::ReadAllBytes($p)))).Replace('-','').ToLowerInvariant();$h.Dispose()
+$m=@{captureHash=('a'*64);screenshots=@(@{path=$p;sha256=$hash;frame='top';cssBounds=@{x=100;y=50;width=300;height=600};ready=$false;needsNormalization=$true;assetIds=@('a')})}
+$mf=${psQuote(path.join(directory, 'screenshots.json'))};[IO.File]::WriteAllText($mf,($m|ConvertTo-Json -Depth 10),(New-Object Text.UTF8Encoding($false)))
+& ([scriptblock]::Create([IO.File]::ReadAllText(${psQuote(helper)}))) -ManifestPath $mf -OutputDirectory ${psQuote(path.join(directory, 'normalized'))}`);
+    const result = JSON.parse(readFileSync(path.join(directory, 'normalized/screenshots.json')));
+    const shot = result.screenshots[0];
+    assert.equal(shot.ready, true); assert.equal(shot.needsNormalization, false); assert.deepEqual(shot.pixelSize, { width: 600, height: 1200 }); assert.equal(shot.assetIds[0], 'a');
+    assert.equal(readFileSync(shot.path).subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
+    const input = JSON.parse(readFileSync(path.join(directory, 'screenshots.json')));
+    for (const issue of ['hash', 'aspect', 'discarded']) {
+      const bad = structuredClone(input);
+      if (issue === 'hash') bad.screenshots[0].sha256 = 'b'.repeat(64);
+      if (issue === 'aspect') bad.screenshots[0].cssBounds.width = 200;
+      if (issue === 'discarded') bad.screenshots[0].discarded = true;
+      const badPath = path.join(directory, `bad-${issue}.json`); writeFileSync(badPath, JSON.stringify(bad));
+      const script = `& ([scriptblock]::Create([IO.File]::ReadAllText(${psQuote(helper)}))) -ManifestPath ${psQuote(badPath)} -OutputDirectory ${psQuote(path.join(directory, 'bad-' + issue))}`;
+      const failure = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { encoding: 'utf8', windowsHide: true, timeout: 20000 });
+      assert.notEqual(failure.status, 0, issue + ' must be rejected');
+    }
+  } finally {
+    const absolute = path.resolve(directory), boundary = path.resolve(tmpdir()) + path.sep;
+    if (!absolute.startsWith(boundary) || !path.basename(absolute).startsWith('chaoxing-image-test-')) throw new Error('Unsafe temporary cleanup');
+    rmSync(absolute, { recursive: true, force: true });
+  }
+});

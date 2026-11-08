@@ -172,6 +172,14 @@ test('ambiguous screenshots in one frame are rejected rather than chosen by arra
   assert.equal(output.rejections[0].code,'ambiguous-frame-screenshots');
 });
 
+test('explicit screenshot band membership disambiguates overlapping crops without mixing asset consumers', () => {
+  const input = capture([asset(), asset({ assetId: 'image-2', locator: '#q2 img' })]);
+  const output = prepareAssetMappings(input, { screenshots: [shot({ path: 'work/band-1.png', assetIds: ['image-1'] }), shot({ path: 'work/band-2.png', assetIds: ['image-2'] })] });
+  assert.equal(output.rejections.length, 0); assert.equal(output.mappings.length, 2);
+  assert.equal(output.mappings.find(m => m.assetId === 'image-1').screenshotPath, 'work/band-1.png');
+  assert.equal(output.mappings.find(m => m.assetId === 'image-2').screenshotPath, 'work/band-2.png');
+});
+
 test('OCR manifest preserves all question refs and crop provenance without trusting an unfinished plan', () => {
   const plan = planCrops(capture(),shot()).plans[0];
   assert.equal(createOcrManifest([plan]).rejections[0].code,'mapping-not-ready');

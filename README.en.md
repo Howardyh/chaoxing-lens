@@ -1,5 +1,7 @@
 # Chaoxing Lens
 
+Version 0.6.0 adds an [exam fast path](skill/references/exam-fast-path.md): retain valid browser bindings, batch source extraction and bounded screenshots for missing formulas, and fetch individual originals only when needed. Before/after page checks reject changed content, frame mismatches and invalid screenshots. Contact sheets use three columns with full-width long formulas. Actual exam count and minute/second timer formats are recognized. Acquisition changes preserve reasoning and option verification; end-to-end speedups require measured browser runs.
+
 Version 0.5.0 defaults to **Question | Answer | Short comparison**. Assignment and exam answering pages are the production inputs; graded pages are review/regression inputs only. Page state reports observed coverage and remaining time, while unknown totals remain unknown.
 
 New capabilities include MathJax SVG root TeX, exact-content question/asset reuse with option remapping, white-background image preparation and adaptive contact sheets, temporary OCR failure caching, separate reading/reasoning/numerical/mapping checks, and blind solve packets that exclude existing answers. Solve packets and answer files now use v2; prepare and verify old runs again.

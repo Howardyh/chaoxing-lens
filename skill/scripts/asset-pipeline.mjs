@@ -208,7 +208,7 @@ export function prepareAssetMappings(capture, options = {}) {
         continue;
       }
     } else if (matches.length) warnings.push({ assetId: asset.assetId, code: valid.length ? 'ambiguous-original-files' : 'invalid-original-file-metadata' });
-    const descriptors = screenshots.filter(screenshot => screenshot?.frame === asset.frame);
+    const descriptors = screenshots.filter(screenshot => screenshot?.frame === asset.frame && (!Array.isArray(screenshot.assetIds) || screenshot.assetIds.includes(asset.assetId)));
     const localCapture = { ...capture, assets: [asset] };
     if (Array.isArray(capture.ocrQueue)) localCapture.ocrQueue = capture.ocrQueue.filter(task => task?.assetId === asset.assetId);
     if (Array.isArray(capture.visualQueue)) localCapture.visualQueue = capture.visualQueue.filter(task => task?.assetId === asset.assetId);

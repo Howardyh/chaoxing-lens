@@ -1,6 +1,6 @@
 {
   "project": "chaoxing-lens",
-  "version": "0.5.0",
-  "sourceSha256": "379a16e30868c5e418cb3fae50ca2d4323471c9362a3fcb2ff8dbeea80713a6a",
+  "version": "0.6.0",
+  "sourceSha256": "b31366279a016a94af9423e194cb72d5ae0c366c011d326fd3d15fa05d148e72",
   "schema": "chaoxing-visible-questions/v3"
 }

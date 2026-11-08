@@ -1,7 +1,7 @@
-/* Chaoxing Lens 0.5.0; source-sha256=379a16e30868c5e418cb3fae50ca2d4323471c9362a3fcb2ff8dbeea80713a6a
+/* Chaoxing Lens 0.6.0; source-sha256=b31366279a016a94af9423e194cb72d5ae0c366c011d326fd3d15fa05d148e72
  * Read-only DOM extraction. No network, storage, page JS or UI writes. */
 (function extractVisibleQuestions(rootDocument, options = {}) {
-  const VERSION = "0.5.0";
+  const VERSION = "0.6.0";
   const started = Date.now();
   const capturedAt = new Date(started).toISOString();
   const captureId = String(options.captureId || capturedAt + ":" + Math.random().toString(36).slice(2, 9));
@@ -12,7 +12,7 @@
   const OPTION = configured.option || '.Zy_ulTop > li, .Zy_ulBottom > li, .mark_letter > li, .answerList > li, li.answerBg, div.answerBg, .option, [role="radio"], [role="checkbox"]';
   const REVIEW = configured.review || '.mark_answer, .analysis, .answer-analysis, .reference-answer';
   const MATH = configured.math || 'math, .katex, .MathJax, mjx-container, [role="math"]';
-  const SKIP = configured.skip || 'script, style, noscript, template, button, .nextDiv, .asFlagBtn, .answerCard, .answer-card, .mark_answerCard, .mark_card, .page-header, .page-footer';
+  const SKIP = configured.skip || 'script, style, noscript, template, button, .nextDiv, .asFlagBtn, .answerCard, .answer-card, .mark_answerCard, .mark_card, .page-header, .page-footer, .num_option svg, .num_option_dx svg, .check_answer svg, .check_answer_dx svg';
   const counters = { nodeVisits: 0, styleReads: 0, visibilityChecks: 0, pathBuilds: 0, formulaRoots: 0, questionRoots: 0, contextRoots: 0 };
   const styles = new Map();
   const visibility = new Map();
@@ -612,21 +612,23 @@
   function pageState() {
     const doc = rootDocument, url = redactedURL(doc.location?.href, doc);
     const read = selector => [...doc.querySelectorAll(selector)].filter(visible).map(el => clean(visibleText(el))).filter(Boolean);
-    const chrome = read('.mark_title,.work-title,.exam-title,.totalNum,#totalQuestion,.questionTotal,.question-count,.total-question,.answerCard,.answer-card,.mark_answerCard,.mark_card,.examnotes,.exam-notes,.status,.work-status,.exam-status');
-    const countTexts = chrome.filter(t => /(?:共|总计|总题数|题目总数)\s*[:：]?\s*\d+\s*题|\d+\s*道题/.test(t));
-    const totals = [...new Set(countTexts.flatMap(t => [...t.matchAll(/(?:(?:共|总计|总题数|题目总数)\s*[:：]?\s*(\d+)\s*题|(\d+)\s*道题)/g)].map(m => Number(m[1] || m[2]))))];
+    const chrome = read('.mark_title,.work-title,.exam-title,.totalNum,#totalQuestion,.questionTotal,.question-count,.total-question,.answerCard,.answer-card,.mark_answerCard,.mark_card,.examnotes,.exam-notes,.status,.work-status,.exam-status,.tabMarkingLeft,h1,h2');
+    const countTexts = chrome.filter(t => /(?:共|总计|总题数|题目总数)\s*[:：]?\s*\d+\s*题|\d+\s*道题|题量\s*[:：]\s*\d+/.test(t));
+    const totals = [...new Set(countTexts.flatMap(t => [...t.matchAll(/(?:(?:共|总计|总题数|题目总数)\s*[:：]?\s*(\d+)\s*题|(\d+)\s*道题|题量\s*[:：]\s*(\d+))/g)].map(m => Number(m[1] || m[2] || m[3]))))];
     const cardNumbers = [...new Set([...doc.querySelectorAll('.answerCard a,.answerCard li,.answer-card a,.answer-card li,.mark_answerCard a,.mark_card li,[data-question-number]')].filter(visible).map(el => clean(visibleText(el))).filter(t => /^\d+$/.test(t)).map(Number))];
     const expected = totals.length === 1 ? totals[0] : totals.length === 0 && cardNumbers.length ? Math.max(...cardNumbers) : null;
     const readNumbers = questions.map(q => q.questionNumber), numbers = new Set(readNumbers.filter(Number.isSafeInteger));
     const missingNumbers = expected !== null && expected <= 10000 ? Array.from({ length: expected }, (_, i) => i + 1).filter(n => !numbers.has(n)) : [];
     const duplicateNumbers = [...numbers].filter(n => readNumbers.filter(v => v === n).length > 1);
-    const timerTexts = read('#remainTime,#remainTime2,.remainTime,.remaining-time,.exam-time,[role="timer"]');
+    const timerTexts = read('#remainTime,#remainTime2,.remainTime,.remaining-time,.exam-time,[role="timer"],.tabMarkingLeft');
     let remainingSeconds = null;
-    const timer = timerTexts.find(t => /\d+:\d{2}|\d+\s*分/.test(t));
+    const timer = timerTexts.find(t => /\d+:\d{2}|\d+\s*分|\d+\s*['′]\s*\d+\s*(?:''|[″"])/.test(t));
     if (timer) {
       const clock = timer.match(/(?:(\d+):)?(\d+):(\d{2})/);
       const mins = timer.match(/(\d+)\s*分(?:钟)?\s*(?:(\d+)\s*秒)?/);
-      if (clock) remainingSeconds = Number(clock[1] || 0) * 3600 + Number(clock[2]) * 60 + Number(clock[3]);
+      const ticks = timer.match(/(\d+)\s*['′]\s*(\d+)\s*(?:''|[″"])/);
+      if (ticks) remainingSeconds = Number(ticks[1]) * 60 + Number(ticks[2]);
+      else if (clock) remainingSeconds = Number(clock[1] || 0) * 3600 + Number(clock[2]) * 60 + Number(clock[3]);
       else if (mins) remainingSeconds = Number(mins[1]) * 60 + Number(mins[2] || 0);
     }
     const family = /\/exam-ans\//.test(url) ? 'exam' : /\/work\//.test(url) ? 'assignment' : 'unknown';
@@ -637,7 +639,8 @@
     let scope = !questions.length ? 'none' : expected === null ? 'rendered' : questions.length === expected && !missingNumbers.length && !duplicateNumbers.length ? 'complete' : 'partial';
     if (totals.length > 1 || expected !== null && questions.length > expected || warnings.some(w => /frame-/.test(w.reason || ''))) scope = questions.length ? 'partial' : 'none';
     const layout = family === 'exam' ? scope === 'complete' ? 'whole-paper' : questions.length === 1 ? 'single-question' : 'rendered-subset' : 'rendered';
-    return { family, state, layout, expectedCount: expected, countEvidence: totals.length ? 'visible-total' : cardNumbers.length ? 'visible-answer-card' : 'unavailable', conflictingCounts: totals.length > 1 ? totals : [], readCount: questions.length, missingNumbers, duplicateNumbers, coverage: scope, remainingSeconds };
+    const template = family !== 'exam' ? null : /\/exam\/preview\/?$/.test(url) || doc.title === '整卷预览' ? 'exam-preview' : state === 'answering' ? 'exam-answering' : 'exam-' + state;
+    return { family, state, layout, template, expectedCount: expected, countEvidence: totals.length ? 'visible-total' : cardNumbers.length ? 'visible-answer-card' : 'unavailable', conflictingCounts: totals.length > 1 ? totals : [], readCount: questions.length, missingNumbers, duplicateNumbers, coverage: scope, remainingSeconds };
   }
   const state = pageState();
   if (state.coverage === 'partial') warnings.push({ reason: 'incomplete-question-coverage', expected: state.expectedCount, read: questions.length, missingNumbers: state.missingNumbers });

@@ -19,6 +19,8 @@ for (const [from, to, replacements] of [
   ['src/semantic-cache.js','semantic-cache.mjs',[]],
   ['src/jev-assist.js','jev-assist.mjs',[]],
   ['src/evaluation.js','evaluation.mjs',[]],
+  ['src/exam-speed.js','exam-speed.mjs',[]],
+  ['src/exam-capture.js','exam-capture.mjs',[["'./exam-speed.js'","'./exam-speed.mjs'"]]],
   ['src/answer-sheet.js','answer-sheet.mjs',[["'./semantic-cache.js'","'./semantic-cache.mjs'"]]],
   ['scripts/check-jev.mjs','check-jev.mjs',[["'../src/jev-assist.js'","'./jev-assist.mjs'"]]],
   ['scripts/evaluate-runs.mjs','evaluate-runs.mjs',[["'../src/evaluation.js'","'./evaluation.mjs'"]]],
