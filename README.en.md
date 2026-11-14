@@ -1,6 +1,6 @@
 # Chaoxing Lens
 
-Version 0.6.0 adds an [exam fast path](skill/references/exam-fast-path.md): retain valid browser bindings, batch source extraction and bounded screenshots for missing formulas, and fetch individual originals only when needed. Before/after page checks reject changed content, frame mismatches and invalid screenshots. Contact sheets use three columns with full-width long formulas. Actual exam count and minute/second timer formats are recognized. Acquisition changes preserve reasoning and option verification; end-to-end speedups require measured browser runs.
+Version 0.7.0 extends [batched screenshot acquisition](skill/references/exam-fast-path.md) to homework and exams. Start with questions that already have complete source text and complete image-dependent questions after checking the screenshots or individual originals. The answer sheet can map verified answer text to the currently observed options, preserving signs, numbers and units. Ambiguous or conflicting matches stay pending.
 
 Version 0.5.0 defaults to **Question | Answer | Short comparison**. Assignment and exam answering pages are the production inputs; graded pages are review/regression inputs only. Page state reports observed coverage and remaining time, while unknown totals remain unknown.
 
@@ -10,7 +10,7 @@ The optional Jev REST adapter checks local readability, explicit type/polarity a
 
 Source-first reading tools for visible Chaoxing questions, formulas and diagrams, with a Codex skill. [中文](README.md)
 
-The read-only extractor produces normalized v3 JSON: questions reference one asset table and shared contexts. It preserves selection state, MathML/TeX sources and explicit OCR/visual-review tasks. The local pipeline prefers images already observed by the browser, otherwise validates frame-local screenshot coordinates and crop provenance. Windows OCR supports content/configuration caching, batch reuse, deadlines and stage timings.
+The read-only extractor produces normalized v3 JSON: questions reference one asset table and shared contexts. It preserves selection state, MathML/TeX sources and explicit OCR/visual-review tasks. The local pipeline verifies screenshot geometry and accepts individually observed originals when screenshots are insufficient. Windows OCR supports content/configuration caching, batch reuse, deadlines and stage timings.
 
 ## Setup
 

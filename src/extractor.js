@@ -4,7 +4,7 @@
  * It never fetches, changes the page, reads storage, or accesses page script state.
  */
 export function extractVisibleQuestions(rootDocument, options = {}) {
-  const VERSION = "0.6.0";
+  const VERSION = "0.7.0";
   const started = Date.now();
   const capturedAt = new Date(started).toISOString();
   const captureId = String(options.captureId || capturedAt + ":" + Math.random().toString(36).slice(2, 9));
@@ -616,8 +616,10 @@ export function extractVisibleQuestions(rootDocument, options = {}) {
     const doc = rootDocument, url = redactedURL(doc.location?.href, doc);
     const read = selector => [...doc.querySelectorAll(selector)].filter(visible).map(el => clean(visibleText(el))).filter(Boolean);
     const chrome = read('.mark_title,.work-title,.exam-title,.totalNum,#totalQuestion,.questionTotal,.question-count,.total-question,.answerCard,.answer-card,.mark_answerCard,.mark_card,.examnotes,.exam-notes,.status,.work-status,.exam-status,.tabMarkingLeft,h1,h2');
-    const countTexts = chrome.filter(t => /(?:共|总计|总题数|题目总数)\s*[:：]?\s*\d+\s*题|\d+\s*道题|题量\s*[:：]\s*\d+/.test(t));
-    const totals = [...new Set(countTexts.flatMap(t => [...t.matchAll(/(?:(?:共|总计|总题数|题目总数)\s*[:：]?\s*(\d+)\s*题|(\d+)\s*道题|题量\s*[:：]\s*(\d+))/g)].map(m => Number(m[1] || m[2] || m[3]))))];
+    const explicit = /(?:题量|总题数|题目总数)\s*[:：]?\s*(\d+)/g;
+    const strongTotals = [...new Set(chrome.flatMap(t => [...t.matchAll(explicit)].map(m => Number(m[1]))))];
+    const sectionOrTotal = /(?:(?:共|总计)\s*[:：]?\s*(\d+)\s*题|(\d+)\s*道题)/g;
+    const totals = strongTotals.length ? strongTotals : [...new Set(chrome.flatMap(t => [...t.matchAll(sectionOrTotal)].map(m => Number(m[1] || m[2]))))];
     const cardNumbers = [...new Set([...doc.querySelectorAll('.answerCard a,.answerCard li,.answer-card a,.answer-card li,.mark_answerCard a,.mark_card li,[data-question-number]')].filter(visible).map(el => clean(visibleText(el))).filter(t => /^\d+$/.test(t)).map(Number))];
     const expected = totals.length === 1 ? totals[0] : totals.length === 0 && cardNumbers.length ? Math.max(...cardNumbers) : null;
     const readNumbers = questions.map(q => q.questionNumber), numbers = new Set(readNumbers.filter(Number.isSafeInteger));

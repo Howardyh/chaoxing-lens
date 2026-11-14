@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { planExamRead } from '../src/exam-speed.js';
-import { captureExamFast } from '../src/exam-capture.js';
+import { planExamRead, planPageRead } from '../src/exam-speed.js';
+import { captureExamFast, capturePageFast } from '../src/exam-capture.js';
 import { extractVisibleQuestions } from '../src/extractor.js';
 import { fixtureDom, installLayout } from './dom-helper.js';
 
@@ -50,6 +50,36 @@ test('source-only and explicitly selected originals do not issue unnecessary scr
   assert.equal(planExamRead(shape(), { mode: 'originals' }).fallbacks.length, 2);
 });
 
+test('homework starts source-complete questions while preserving option and shared-image dependencies', () => {
+  const c = shape(); c.page.family = 'assignment';
+  c.questions[0].assetIds = [];
+  c.questions[0].options = [{ assetIds: ['a'] }];
+  c.questions[1].assetIds = [];
+  c.questions[1].contextIds = ['material'];
+  c.contexts = [{ id: 'material', assetIds: ['b'] }];
+  c.questions.push({ key: 'q3', questionNumber: 3, prompt: '3. Text only', options: [], assetIds: [], contextIds: [] });
+  c.count++;
+  const plan = planPageRead(c);
+  assert.equal(plan.schema, 'chaoxing-page-read-plan/v1');
+  assert.deepEqual(plan.sourceReadyQuestionKeys, ['q3']);
+  assert.equal(plan.screenshots.length, 1);
+  assert.deepEqual(plan.screenshots[0].assetIds, ['a', 'b']);
+  c.assets.pop();
+  assert.deepEqual(planPageRead(c).fallbacks, [{ assetId: 'b', reason: 'queue-asset-missing' }]);
+});
+
+test('visible assignment total takes precedence over counts for individual sections', () => {
+  const dom = fixtureDom('legacy');
+  dom.reconfigure({ url: 'https://example.test/mooc-ans/mooc2/work/dowork' });
+  dom.window.document.body.innerHTML = '<h1>题量：3 满分：100</h1><h2>单选题（共 2 题）</h2><h2>判断题（共 1 题）</h2>'
+    + [1, 2, 3].map(n => `<div class="questionLi" id="question${n}"><h3>${n}.（单选题）合成题</h3><ul class="Zy_ulTop"><li>A. 甲</li><li>B. 乙</li></ul></div>`).join('');
+  installLayout(dom.window);
+  const capture = extractVisibleQuestions(dom.window.document);
+  dom.window.close();
+  assert.equal(capture.page.expectedCount, 3);
+  assert.equal(capture.page.coverage, 'complete');
+});
+
 async function isolated(run) {
   const directory = await mkdtemp(path.join(tmpdir(), 'chaoxing-exam-test-'));
   try { await run(path.join(directory, 'run')); }
@@ -59,6 +89,11 @@ async function isolated(run) {
   }
 }
 function pngHeader(width, height) { const bytes = Buffer.alloc(24); Buffer.from([137,80,78,71,13,10,26,10]).copy(bytes); bytes.write('IHDR', 12); bytes.writeUInt32BE(width, 16); bytes.writeUInt32BE(height, 20); return bytes; }
+function jpegHeader(width, height) {
+  const bytes = Buffer.from([255, 216, 255, 192, 0, 11, 8, 0, 0, 0, 0, 1, 1, 0x11, 0, 255, 217]);
+  bytes.writeUInt16BE(height, 7); bytes.writeUInt16BE(width, 9);
+  return bytes;
+}
 
 test('capture helper batches source and screenshots, verifies page identity and emits crop-compatible descriptors', async () => isolated(async outputDirectory => {
   let reads = 0, shots = 0;
@@ -71,9 +106,13 @@ test('capture helper batches source and screenshots, verifies page identity and 
 }));
 
 test('changed page, screenshot failure or ignored clip cannot become ready visual evidence', async () => {
-  for (const kind of ['changed', 'failure', 'ignored-clip']) await isolated(async outputDirectory => {
+  for (const kind of ['changed', 'failure', 'ignored-clip', 'ignored-clip-jpeg']) await isolated(async outputDirectory => {
     let reads = 0;
-    const tab = { playwright: { evaluate: async () => { const c = shape(); if (++reads > 1 && kind === 'changed') c.questions[0].prompt = 'Different problem'; return c; } }, screenshot: async options => { if (kind === 'failure') throw new Error('No capture'); return kind === 'ignored-clip' ? pngHeader(1200, 5000) : pngHeader(options.clip.width, options.clip.height); } };
+    const tab = { playwright: { evaluate: async () => { const c = shape(); if (++reads > 1 && kind === 'changed') c.questions[0].prompt = 'Different problem'; return c; } }, screenshot: async ({ clip }) => {
+      if (kind === 'failure') throw new Error('No capture');
+      if (kind === 'ignored-clip-jpeg') return jpegHeader(1200, 5000);
+      return kind === 'ignored-clip' ? pngHeader(1200, 5000) : pngHeader(clip.width, clip.height);
+    } };
     const result = await captureExamFast(tab, { extractorSource: source, outputDirectory });
     assert.deepEqual(result.fallbackAssetIds, ['a', 'b']);
     const saved = JSON.parse(await readFile(path.join(outputDirectory, 'screenshots.json')));
@@ -83,9 +122,40 @@ test('changed page, screenshot failure or ignored clip cannot become ready visua
 });
 
 test('observed JPEG screenshots are saved as pending normalization, never mislabelled as verified PNG', async () => isolated(async outputDirectory => {
-  const tab = { playwright: { evaluate: async () => shape() }, screenshot: async () => Buffer.from([255,216,255,224,0,0]) };
+  const tab = { playwright: { evaluate: async () => shape() }, screenshot: async ({ clip }) => jpegHeader(clip.width, clip.height) };
   const result = await captureExamFast(tab, { extractorSource: source, outputDirectory });
   assert.equal(result.screenshotCount, 1); assert.equal(result.readyScreenshotCount, 0); assert.equal(result.pendingNormalizationCount, 1); assert.deepEqual(result.fallbackAssetIds, []);
   const saved = JSON.parse(await readFile(path.join(outputDirectory, 'screenshots.json')));
-  assert.equal(saved.screenshots[0].contentType, 'image/jpeg'); assert.equal(saved.screenshots[0].pixelSize, null); assert.equal(saved.screenshots[0].ready, false); assert.ok(saved.screenshots[0].path.endsWith('.jpg'));
+  assert.equal(saved.screenshots[0].contentType, 'image/jpeg'); assert.equal(saved.screenshots[0].pixelSize.width, saved.screenshots[0].cssBounds.width); assert.equal(saved.screenshots[0].ready, false); assert.ok(saved.screenshots[0].path.endsWith('.jpg'));
+}));
+
+test('capture-local question and image IDs stay comparable across fresh extractions', async () => isolated(async outputDirectory => {
+  const dom = fixtureDom('legacy');
+  dom.reconfigure({ url: 'https://example.test/mooc-ans/mooc2/work/dowork' });
+  dom.window.document.body.innerHTML = '<div class="questionLi"><h3>1.（单选题）图示<img src="https://example.test/formula.png" width="120" height="22"></h3><ul class="Zy_ulTop"><li>A. 甲</li><li>B. 乙</li></ul></div>';
+  installLayout(dom.window);
+  let reads = 0;
+  const tab = { playwright: { evaluate: async () => extractVisibleQuestions(dom.window.document, { captureId: 'local-' + ++reads }) },
+    screenshot: async ({ clip }) => pngHeader(clip.width, clip.height) };
+  try {
+    const result = await capturePageFast(tab, { extractorSource: source, outputDirectory });
+    assert.equal(reads, 2);
+    assert.equal(result.readyScreenshotCount, 1);
+    assert.equal(result.pageChanged, false);
+    assert.equal(result.fallbackAssetIds.length, 0);
+    const saved = JSON.parse(await readFile(path.join(outputDirectory, 'screenshots.json')));
+    assert.equal(saved.schema, 'chaoxing-page-fast-capture/v1');
+  } finally { dom.window.close(); }
+}));
+
+test('a stale homework capture cannot acquire screenshots from a different page', async () => isolated(async outputDirectory => {
+  const capture = shape(), different = shape();
+  different.questions[0].prompt = 'Different problem';
+  let shots = 0;
+  const tab = { playwright: { evaluate: async () => different }, screenshot: async () => { shots++; } };
+  const result = await capturePageFast(tab, { extractorSource: source, outputDirectory, capture });
+  assert.equal(shots, 0);
+  assert.equal(result.pageChanged, true);
+  assert.deepEqual(result.sourceReadyQuestionKeys, []);
+  assert.deepEqual(result.fallbackAssetIds, ['a', 'b']);
 }));

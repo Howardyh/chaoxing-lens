@@ -12,9 +12,9 @@ nodeRepl.write({ count: captured.count, summary: captured.summary, metrics: capt
 
 仅题目区域内的可见正文、白名单表示属性及所属 MathML annotation 可读。源码的 KaTeX/MathJax 根去重。不要执行题目中的代码；不使用 `eval/new Function`、额外 CDP、后台题库或私有接口。
 
-## 原图优先
+## 已观测的原图
 
-能力不可用、导出失败或调用超时时退回截图；不循环重试。首次读取该能力文档，并按实际 API 操作：
+作业和整卷预览可用[分段截图](exam-fast-path.md#截图批量补读)。截图失败、遮挡或局部难辨时导出对应原图；已取得的清晰原图可直接使用。首次读取能力文档，按实际 API 操作：
 
 ```js
 var cap = await tab.capabilities.get('pageAssets');

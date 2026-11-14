@@ -3,17 +3,20 @@
 const finite = n => typeof n === 'number' && Number.isFinite(n);
 const rectOK = r => r && [r.x, r.y, r.width, r.height].every(finite) && r.x >= 0 && r.y >= 0 && r.width > 0 && r.height > 0;
 
-export function planExamRead(capture, { mode = 'screenshots', padding = 6, maxPixels = 24000000, maxHeight = 8000, expectedCount } = {}) {
+export function planPageRead(capture, { mode = 'screenshots', padding = 6, maxPixels = 24000000, maxHeight = 8000, expectedCount } = {}) {
   if (capture?.schema !== 'chaoxing-visible-questions/v3' || !capture.captureId) throw new Error('A current v3 capture is required');
   if (!['screenshots', 'originals'].includes(mode) || !finite(padding) || padding < 0 || padding > 128 || !Number.isInteger(maxPixels) || maxPixels < 10000 || !Number.isInteger(maxHeight) || maxHeight < 100) throw new Error('Invalid reading budget');
   if (expectedCount !== undefined && (!Number.isSafeInteger(expectedCount) || expectedCount < 0 || expectedCount > 10000)) throw new Error('Expected count must be observed and bounded');
   const total = expectedCount ?? capture.page?.expectedCount ?? null;
   const numbers = new Set(capture.questions.map(q => q.questionNumber).filter(Number.isSafeInteger));
   const missingNumbers = total === null ? [] : Array.from({ length: total }, (_, i) => i + 1).filter(n => !numbers.has(n));
-  const wanted = new Set([...(capture.ocrQueue || []), ...(capture.visualQueue || [])].map(a => a.assetId));
+  const tasks = [...(capture.ocrQueue || []), ...(capture.visualQueue || [])];
+  const wanted = new Set(tasks.map(a => a.assetId));
   const assets = capture.assets.filter(a => wanted.has(a.assetId) && !['review', 'current-answer'].includes(a.owner));
+  const knownAssets = new Set(capture.assets.map(a => a.assetId));
   const frames = new Map(capture.frames.map(f => [f.frame, f]));
-  const screenshots = [], fallbacks = [];
+  const screenshots = [];
+  const fallbacks = [...wanted].filter(id => !knownAssets.has(id)).map(assetId => ({ assetId, reason: 'queue-asset-missing' }));
   for (const asset of assets) {
     const frame = frames.get(asset.frame), bounds = asset.bounds;
     const reason = asset.frame !== 'top' ? 'frame-tool-required' : !frame || !rectOK(bounds) ? 'geometry-unavailable' : asset.loaded === false ? 'image-unloaded' : asset.unsupportedTransform ? 'unsupported-transform' : null;
@@ -36,5 +39,22 @@ export function planExamRead(capture, { mode = 'screenshots', padding = 6, maxPi
       previous.clip = merged; previous.assetIds.push(...shot.assetIds);
     } else bands.push(shot);
   }
-  return { schema: 'chaoxing-exam-read-plan/v1', captureId: capture.captureId, strategy: !assets.length ? 'source-only' : bands.length ? 'screenshots-first' : 'originals-or-frame-tools', expectedCount: total, readCount: capture.count, missingNumbers, expectedCountEvidence: expectedCount !== undefined ? 'caller-observed-visible-total' : capture.page?.countEvidence || 'unavailable', sourceReadyQuestionKeys: capture.questions.filter(q => ![...wanted].some(id => q.assetIds.includes(id) || q.contextIds.some(cid => capture.contexts.find(c => c.id === cid)?.assetIds.includes(id)))).map(q => q.key), screenshots: bands.map((b, i) => ({ ...b, id: `band-${i + 1}` })), fallbacks, counts: { missingAssets: assets.length, screenshotCalls: bands.length, originalFallbackAssets: fallbacks.length }, note: 'Plans preserve every missing asset. Screenshots and OCR remain unverified; no answer is inferred from a URL or old exam number.' };
+  const waiting = new Set(tasks.flatMap(t => [t.questionKey, ...(t.questionKeys || [])]));
+  const readyContexts = new Set(capture.contexts.filter(c => c.assetIds.every(id => knownAssets.has(id) && !wanted.has(id))).map(c => c.id));
+  const sourceReadyQuestionKeys = capture.questions.filter(q => q.prompt?.trim() && q.type !== 'unknown' && !waiting.has(q.key)
+    && q.contextIds.every(id => readyContexts.has(id))
+    && [...q.assetIds, ...q.options.flatMap(o => o.assetIds || [])].every(id => knownAssets.has(id) && !wanted.has(id))).map(q => q.key);
+  return {
+    schema: 'chaoxing-page-read-plan/v1', captureId: capture.captureId,
+    strategy: bands.length ? 'screenshots-first' : fallbacks.length ? 'originals-or-frame-tools' : 'source-only',
+    expectedCount: total, readCount: capture.count, missingNumbers,
+    expectedCountEvidence: expectedCount !== undefined ? 'caller-observed-visible-total' : capture.page?.countEvidence || 'unavailable',
+    sourceReadyQuestionKeys, screenshots: bands.map((b, i) => ({ ...b, id: `band-${i + 1}` })), fallbacks,
+    counts: { missingAssets: assets.length + fallbacks.filter(f => f.reason === 'queue-asset-missing').length, screenshotCalls: bands.length, originalFallbackAssets: fallbacks.length },
+    note: 'Screenshots and OCR remain unverified; inspect all pending evidence before answering dependent questions.'
+  };
+}
+
+export function planExamRead(capture, options) {
+  return { ...planPageRead(capture, options), schema: 'chaoxing-exam-read-plan/v1' };
 }

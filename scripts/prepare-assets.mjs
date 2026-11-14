@@ -37,7 +37,9 @@ if (opts.mappings) {
     }
   }
   const input = opts.screenshots ? await load(opts.screenshots) : [];
-  const screenshots = Array.isArray(input) ? input : input.screenshots || [input];
+  if (input.captureHash && input.captureHash !== captureHash) throw new Error('Screenshots belong to a different capture');
+  if (input.failures?.some(failure => failure.reason === 'page-changed-during-capture')) throw new Error('Page changed; recapture screenshots');
+  const screenshots = (Array.isArray(input) ? input : input.screenshots || [input]).filter(shot => !shot.discarded && shot.ready !== false);
   for (const shot of screenshots) {
     const bytes = await readFile(local(shot.path));
     if (digest(bytes) !== shot.sha256) throw new Error('Screenshot hash changed');

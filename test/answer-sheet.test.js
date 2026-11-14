@@ -125,3 +125,36 @@ test('dangling references and inconsistent counts cannot silently omit material'
     const c = fixture(); mutate(c); assert.throws(() => prepareAnswers(c));
   }
 });
+
+test('candidate text maps to the current order without merging signs, units or judgment labels', () => {
+  const c = fixture();
+  c.questions[0].options = [
+    { label: 'A', text: 'A. 2 m' }, { label: 'B', text: 'B. −2 m' }, { label: 'C', text: 'C. 2 cm' }
+  ];
+  c.questions[2].options = [{ label: 'A', text: 'A. 错误' }, { label: 'B', text: 'B. 正确' }];
+  const answers = solved(c);
+  Object.assign(answers.answers[0], { choices: [], choiceTexts: ['  −2   m '] });
+  Object.assign(answers.answers[2], { choices: [], choiceTexts: ['True'] });
+  let sheet = formatAnswers(c, answers);
+  assert.equal(sheet.rows[0].answer, 'B');
+  assert.equal(sheet.rows[2].answer, '正确');
+  answers.answers[0].choices = ['A'];
+  sheet = formatAnswers(c, answers);
+  assert.equal(sheet.rows[0].status, 'review');
+  assert.match(sheet.rows[0].issues.join(' '), /答案文字与当前选项/);
+  answers.answers[0].choices = [];
+  answers.answers[0].choiceTexts = ['-2 m'];
+  assert.equal(formatAnswers(c, answers).rows[0].status, 'review');
+});
+
+test('candidate text does not override ambiguous options or an unresolved image alternative', () => {
+  const c = fixture();
+  c.questions[0].options = [{ label: 'A', text: 'A. 重复' }, { label: 'B', text: 'B. 重复' }];
+  const answers = solved(c);
+  Object.assign(answers.answers[0], { choices: [], choiceTexts: ['重复'] });
+  assert.equal(formatAnswers(c, answers).rows[0].status, 'review');
+  c.questions[0].options[1].text = `B. [[${c.assets.find(a => a.sourceStatus !== 'canonical').assetId}]]`;
+  const imageAnswers = solved(c);
+  Object.assign(imageAnswers.answers[0], { choices: [], choiceTexts: ['重复'] });
+  assert.equal(formatAnswers(c, imageAnswers).rows[0].status, 'review');
+});

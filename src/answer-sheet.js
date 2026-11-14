@@ -10,6 +10,33 @@ const nonempty = value => typeof value === 'string' && Boolean(value.trim());
 const cell = value => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\|/g, '&#124;').replace(/\\/g, '&#92;').replace(/`/g, '&#96;').replace(/\*/g, '&#42;').replace(/_/g, '&#95;').replace(/\[/g, '&#91;').replace(/\]/g, '&#93;').replace(/\r?\n/g, '<br>');
 const isChoice = type => ['single-choice', 'multiple-choice', 'true-false'].includes(type);
 const choiceToken = option => nonempty(option.label) ? option.label : option.text;
+const normalizedChoice = value => value.normalize('NFC').replace(/\s+/g, ' ').trim();
+
+function judgment(value) {
+  const text = value.toLowerCase();
+  if (['对', '正确', '是', '√', 'true', 'yes'].includes(text)) return true;
+  if (['错', '错误', '否', '×', 'false', 'no'].includes(text)) return false;
+  return null;
+}
+
+// Exact content matching uses current options. Preserve punctuation, numbers,
+// signs and units, and leave unresolved alternatives ambiguous.
+function matchChoiceTexts(question, values, capture, readings) {
+  if (!Array.isArray(values) || !values.length || values.some(value => !nonempty(value))) return null;
+  const options = question.options.map(option => {
+    const parsed = resolveText(optionContent(option), capture, readings);
+    return parsed.unresolved.length || /\[\[.*?\]\]/s.test(parsed.text) ? null : normalizedChoice(parsed.text);
+  });
+  if (options.some(text => !text)) return null;
+  const matching = values.map(value => {
+    const query = normalizedChoice(value);
+    const exact = options.map((text, i) => text === query ? i : -1).filter(i => i >= 0);
+    if (exact.length || question.type !== 'true-false' || judgment(query) === null) return exact;
+    return options.map((text, i) => judgment(text) === judgment(query) ? i : -1).filter(i => i >= 0);
+  });
+  if (matching.some(matches => matches.length !== 1)) return null;
+  return matching.map(([i]) => choiceToken(question.options[i]));
+}
 
 function indexed(values, field) {
   const result = new Map();
@@ -118,7 +145,13 @@ export function formatAnswers(capture, answers) {
       if (!Array.isArray(a.reviewedWarnings || []) || otherWarnings.some(w => !a.reviewedWarnings?.includes(w))) issues.push('题目读取警告尚未核验');
       if (isChoice(q.type)) {
         const labels = q.options.map(choiceToken);
-        const choices = a.choices;
+        const suppliedTexts = a.choiceTexts !== undefined;
+        const matched = suppliedTexts ? matchChoiceTexts(q, a.choiceTexts, capture, readings) : null;
+        const hasNoChoices = a.choices === undefined || Array.isArray(a.choices) && !a.choices.length;
+        const choices = suppliedTexts && hasNoChoices ? matched : a.choices;
+        if (suppliedTexts && (!matched || !Array.isArray(choices) || choices.length !== matched.length || matched.some(label => !choices.includes(label)))) {
+          issues.push('答案文字与当前选项存在冲突或无法唯一对应');
+        }
         if (labels.some(l => !nonempty(l)) || new Set(labels).size !== labels.length) issues.push('选项标记不唯一，需要核对原题');
         if (!Array.isArray(choices) || !choices.length || choices.some(v => !labels.includes(v)) || new Set(choices).size !== choices.length || (q.type !== 'multiple-choice' && choices.length !== 1)) {
           issues.push('选项数量或标记不符合原题');
